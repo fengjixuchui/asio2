@@ -19,24 +19,28 @@
 
 #include <asio2/tcp/tcp_client.hpp>
 #include <asio2/tcp/component/ssl_stream_cp.hpp>
+#include <asio2/tcp/component/ssl_context_cp.hpp>
 
 namespace asio2::detail
 {
 	template<class derived_t, class socket_t, class buffer_t>
 	class tcps_client_impl_t
-		: public asio::ssl::context
+		: public ssl_context_cp<derived_t, false>
 		, public tcp_client_impl_t<derived_t, socket_t, buffer_t>
 		, public ssl_stream_cp<derived_t, socket_t, false>
 	{
 		template <class, bool>                friend class user_timer_cp;
+		template <class>                      friend class post_cp;
 		template <class, bool>                friend class reconnect_timer_cp;
 		template <class, bool>                friend class connect_timeout_cp;
-		template <class, class>               friend class connect_cp;
+		template <class, class, bool>         friend class connect_cp;
+		template <class, class, bool>         friend class disconnect_cp;
 		template <class>                      friend class data_persistence_cp;
 		template <class>                      friend class event_queue_cp;
 		template <class, bool>                friend class send_cp;
 		template <class, bool>                friend class tcp_send_op;
 		template <class, bool>                friend class tcp_recv_op;
+		template <class, bool>				  friend class ssl_context_cp;
 		template <class, class, bool>         friend class ssl_stream_cp;
 		template <class, class, class>        friend class client_impl_t;
 		template <class, class, class>        friend class tcp_client_impl_t;
@@ -45,6 +49,7 @@ namespace asio2::detail
 		using self = tcps_client_impl_t<derived_t, socket_t, buffer_t>;
 		using super = tcp_client_impl_t<derived_t, socket_t, buffer_t>;
 		using buffer_type = buffer_t;
+		using ssl_context_comp = ssl_context_cp<derived_t, false>;
 		using ssl_stream_comp = ssl_stream_cp<derived_t, socket_t, false>;
 		using super::send;
 
@@ -56,9 +61,9 @@ namespace asio2::detail
 			std::size_t init_buffer_size = tcp_frame_size,
 			std::size_t max_buffer_size = (std::numeric_limits<std::size_t>::max)()
 		)
-			: asio::ssl::context(method)
+			: ssl_context_comp(method)
 			, super(init_buffer_size, max_buffer_size)
-			, ssl_stream_comp(this->io_, asio::ssl::stream_base::client)
+			, ssl_stream_comp(this->io_, *this, asio::ssl::stream_base::client)
 		{
 		}
 
@@ -70,20 +75,9 @@ namespace asio2::detail
 			this->stop();
 		}
 
-		inline derived_t & set_cert(std::string_view cert)
-		{
-			this->add_certificate_authority(asio::buffer(cert));
-			return (this->derived());
-		}
-
-		inline derived_t & set_cert_file(const std::string& file)
-		{
-			this->load_verify_file(file);
-			return (this->derived());
-		}
-
 		/**
 		 * @function : get the stream object refrence
+		 * 
 		 */
 		inline typename ssl_stream_comp::stream_type & stream()
 		{
@@ -103,21 +97,31 @@ namespace asio2::detail
 		template<class F, class ...C>
 		inline derived_t & bind_handshake(F&& fun, C&&... obj)
 		{
-			this->listener_.bind(event::handshake, observer_t<error_code>(std::forward<F>(fun), std::forward<C>(obj)...));
+			this->listener_.bind(event::handshake,
+				observer_t<error_code>(std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
 	protected:
+		template<typename MatchCondition>
+		inline void _do_init(condition_wrap<MatchCondition> condition)
+		{
+			super::_do_init(condition);
+
+			this->derived()._ssl_init(condition, this->socket_, *this);
+		}
+
 		inline void _handle_disconnect(const error_code& ec, std::shared_ptr<derived_t> this_ptr)
 		{
-			this->derived()._ssl_stop(this_ptr, [this, ec, this_ptr]()
+			this->derived()._ssl_stop(this_ptr, [this, ec, this_ptr]() mutable
 			{
 				super::_handle_disconnect(ec, std::move(this_ptr));
 			});
 		}
 
-		template<bool isAsync, typename MatchCondition>
-		inline void _handle_connect(const error_code & ec, std::shared_ptr<derived_t> this_ptr, condition_wrap<MatchCondition> condition)
+		template<typename MatchCondition>
+		inline void _handle_connect(const error_code & ec, std::shared_ptr<derived_t> this_ptr,
+			condition_wrap<MatchCondition> condition)
 		{
 			set_last_error(ec);
 

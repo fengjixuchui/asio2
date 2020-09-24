@@ -52,7 +52,7 @@ namespace asio2::detail
 		, public post_cp<derived_t>
 	{
 		template <class, bool>  friend class user_timer_cp;
-		template <class> friend class post_cp;
+		template <class>        friend class post_cp;
 
 	public:
 		using self = server_impl_t<derived_t, session_t>;
@@ -67,7 +67,8 @@ namespace asio2::detail
 			, user_data_cp<derived_t>()
 			, user_timer_cp<derived_t, false>(iopool_.get(0))
 			, post_cp<derived_t>()
-			, allocator_()
+			, rallocator_()
+			, wallocator_()
 			, listener_()
 			, io_(iopool_.get(0))
 			, sessions_(io_)
@@ -95,12 +96,19 @@ namespace asio2::detail
 		inline void stop()
 		{
 			if (!this->io_.strand().running_in_this_thread())
-				return asio::post(this->io_.strand(), std::bind(&self::stop, this));
+			{
+				this->derived().post([this, this_ptr = this->derived().selfptr()]() mutable
+				{
+					this->stop();
+				});
+				return;
+			}
 
 			// close user custom timers
 			this->stop_all_timers();
 
-			// destroy user data, maybe the user data is self shared_ptr, if don't destroy it, will cause loop refrence.
+			// destroy user data, maybe the user data is self shared_ptr, 
+			// if don't destroy it, will cause loop refrence.
 			this->user_data_.reset();
 		}
 
@@ -167,8 +175,9 @@ namespace asio2::detail
 		 * PodType (&data)[N] : double m[10]; send(m,5);
 		 */
 		template<class CharT, class SizeT>
-		inline typename std::enable_if_t<std::is_integral_v<std::remove_cv_t<std::remove_reference_t<SizeT>>>, derived_t&>
-			send(CharT * s, SizeT count)
+		inline typename std::enable_if_t<std::is_integral_v<std::remove_cv_t<
+			std::remove_reference_t<SizeT>>>, derived_t&>
+			send(CharT* s, SizeT count)
 		{
 			if (s)
 			{
@@ -237,7 +246,8 @@ namespace asio2::detail
 		 * bool(std::shared_ptr<asio2::xxx_session>& session_ptr)
 		 * @return   : std::shared_ptr<asio2::xxx_session>
 		 */
-		inline std::shared_ptr<session_t> find_session_if(const std::function<bool(std::shared_ptr<session_t>&)> & fn)
+		inline std::shared_ptr<session_t> find_session_if(
+			const std::function<bool(std::shared_ptr<session_t>&)> & fn)
 		{
 			return std::shared_ptr<session_t>(this->sessions_.find_if(fn));
 		}
@@ -248,6 +258,15 @@ namespace asio2::detail
 		inline io_t & io() { return this->io_; }
 
 	protected:
+		/**
+		 * @function : get the recv/read allocator object refrence
+		 */
+		inline auto & rallocator() { return this->rallocator_; }
+		/**
+		 * @function : get the send/write/post allocator object refrence
+		 */
+		inline auto & wallocator() { return this->wallocator_; }
+
 		inline session_mgr_t<session_t> & sessions() { return this->sessions_; }
 		inline listener_t               & listener() { return this->listener_; }
 		inline std::atomic<state_t>     & state()    { return this->state_;    }
@@ -255,22 +274,25 @@ namespace asio2::detail
 
 	protected:
 		// The memory to use for handler-based custom memory allocation. used for acceptor.
-		handler_memory<>          allocator_;
+		handler_memory<>                            rallocator_;
+
+		/// The memory to use for handler-based custom memory allocation. used fo send/write/post.
+		handler_memory<size_op<>, std::true_type>   wallocator_;
 
 		/// listener
-		listener_t                listener_;
+		listener_t                                  listener_;
 
 		/// The io (include io_context and strand) used to handle the accept event.
-		io_t                    & io_;
+		io_t                                      & io_;
 
 		/// session_mgr
-		session_mgr_t<session_t>  sessions_;
+		session_mgr_t<session_t>                    sessions_;
 
 		/// state
-		std::atomic<state_t>      state_ = state_t::stopped;
+		std::atomic<state_t>                        state_ = state_t::stopped;
 
 		/// use this to ensure that server stop only after all sessions are closed
-		std::shared_ptr<void>     counter_ptr_;
+		std::shared_ptr<void>                       counter_ptr_;
 	};
 }
 

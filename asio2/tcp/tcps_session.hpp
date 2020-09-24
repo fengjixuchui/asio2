@@ -19,6 +19,7 @@
 
 #include <asio2/tcp/tcp_session.hpp>
 #include <asio2/tcp/component/ssl_stream_cp.hpp>
+#include <asio2/tcp/component/ssl_context_cp.hpp>
 
 namespace asio2::detail
 {
@@ -32,6 +33,9 @@ namespace asio2::detail
 		, public ssl_stream_cp<derived_t, socket_t, true>
 	{
 		template <class, bool>                friend class user_timer_cp;
+		template <class>                      friend class post_cp;
+		template <class, class, bool>         friend class connect_cp;
+		template <class, class, bool>         friend class disconnect_cp;
 		template <class>                      friend class data_persistence_cp;
 		template <class>                      friend class event_queue_cp;
 		template <class, bool>                friend class send_cp;
@@ -58,15 +62,15 @@ namespace asio2::detail
 		 * @constructor
 		 */
 		explicit tcps_session_impl_t(
-			asio::ssl::context & ctx,
+			asio::ssl::context       & ctx,
 			session_mgr_t<derived_t> & sessions,
-			listener_t & listener,
-			io_t & rwio,
-			std::size_t init_buffer_size,
-			std::size_t max_buffer_size
+			listener_t               & listener,
+			io_t                     & rwio,
+			std::size_t                init_buffer_size,
+			std::size_t                max_buffer_size
 		)
 			: super(sessions, listener, rwio, init_buffer_size, max_buffer_size)
-			, ssl_stream_comp(this->io_, asio::ssl::stream_base::server)
+			, ssl_stream_comp(this->io_, ctx, asio::ssl::stream_base::server)
 			, ctx_(ctx)
 		{
 		}
@@ -97,24 +101,32 @@ namespace asio2::detail
 		}
 
 	protected:
+		template<typename MatchCondition>
+		inline void _do_init(std::shared_ptr<derived_t> this_ptr, condition_wrap<MatchCondition> condition)
+		{
+			super::_do_init(std::move(this_ptr), condition);
+
+			this->derived()._ssl_init(condition, this->socket_, this->ctx_);
+		}
+
 		inline void _handle_disconnect(const error_code& ec, std::shared_ptr<derived_t> this_ptr)
 		{
-			this->derived()._ssl_stop(this_ptr, [this, ec, this_ptr]()
+			this->derived()._ssl_stop(this_ptr, [this, ec, this_ptr]() mutable
 			{
 				super::_handle_disconnect(ec, std::move(this_ptr));
 			});
 		}
 
 		template<typename MatchCondition>
-		inline void _handle_connect(const error_code& ec, std::shared_ptr<derived_t> this_ptr, condition_wrap<MatchCondition> condition)
+		inline void _handle_connect(const error_code& ec, std::shared_ptr<derived_t> this_ptr,
+			condition_wrap<MatchCondition> condition)
 		{
-			asio::post(this->io_.strand(), make_allocator(this->wallocator_,
-				[this, self_ptr = std::move(this_ptr), condition]()
+			this->derived().post([this, self_ptr = std::move(this_ptr), condition]() mutable
 			{
 				this->derived()._ssl_start(self_ptr, condition, this->socket_, this->ctx_);
 
 				this->derived()._post_handshake(std::move(self_ptr), std::move(condition));
-			}));
+			});
 		}
 
 		inline void _fire_handshake(std::shared_ptr<derived_t>& this_ptr, error_code ec)

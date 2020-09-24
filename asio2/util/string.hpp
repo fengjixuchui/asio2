@@ -28,8 +28,26 @@
 #include <type_traits>
 
 #ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable:4996)
+#  pragma warning(push) 
+#  pragma warning(disable:4311)
+#  pragma warning(disable:4312)
+#  pragma warning(disable:4996)
+#endif
+
+#if defined(__GNUC__) || defined(__GNUG__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wunused-variable"
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wunused-variable"
+#  pragma clang diagnostic ignored "-Wexceptions"
+#  pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#  pragma clang diagnostic ignored "-Wunused-private-field"
+#  pragma clang diagnostic ignored "-Wunused-local-typedef"
+#  pragma clang diagnostic ignored "-Wunknown-warning-option"
 #endif
 
 namespace asio2
@@ -44,7 +62,8 @@ namespace asio2
 
 		if (format && *format)
 		{
-			// under windows and linux system,std::vsnprintf(nullptr, 0, format, args) can get the need buffer len for the output,
+			// under windows and linux system,std::vsnprintf(nullptr, 0, format, args)
+			// can get the need buffer len for the output,
 			va_list args_copy;
 
 			va_copy(args_copy, args);
@@ -107,7 +126,8 @@ namespace asio2
 
 		if (format && *format)
 		{
-			// under windows and linux system,std::vsnprintf(nullptr, 0, format, args) can get the need buffer len for the output,
+			// under windows and linux system,std::vsnprintf(nullptr, 0, format, args)
+			// can get the need buffer len for the output,
 			va_list args;
 			va_start(args, format);
 
@@ -148,7 +168,8 @@ namespace asio2
 		class Traits = std::char_traits<CharT>,
 		class Allocator = std::allocator<CharT>
 	>
-		std::basic_string<CharT, Traits, Allocator>& trim_all(std::basic_string<CharT, Traits, Allocator>& s)
+		std::basic_string<CharT, Traits, Allocator>& trim_all(
+			std::basic_string<CharT, Traits, Allocator>& s)
 	{
 		using size_type = typename std::basic_string<CharT, Traits, Allocator>::size_type;
 		for (size_type i = s.size() - 1; i != size_type(-1); i--)
@@ -169,7 +190,8 @@ namespace asio2
 		class Traits = std::char_traits<CharT>,
 		class Allocator = std::allocator<CharT>
 	>
-		std::basic_string<CharT, Traits, Allocator>& trim_left(std::basic_string<CharT, Traits, Allocator>& s)
+		std::basic_string<CharT, Traits, Allocator>& trim_left(
+			std::basic_string<CharT, Traits, Allocator>& s)
 	{
 		using size_type = typename std::basic_string<CharT, Traits, Allocator>::size_type;
 		size_type pos = 0;
@@ -190,7 +212,8 @@ namespace asio2
 		class Traits = std::char_traits<CharT>,
 		class Allocator = std::allocator<CharT>
 	>
-		std::basic_string<CharT, Traits, Allocator>& trim_right(std::basic_string<CharT, Traits, Allocator>& s)
+		std::basic_string<CharT, Traits, Allocator>& trim_right(
+			std::basic_string<CharT, Traits, Allocator>& s)
 	{
 		using size_type = typename std::basic_string<CharT, Traits, Allocator>::size_type;
 		size_type pos = s.size() - 1;
@@ -211,7 +234,8 @@ namespace asio2
 		class Traits = std::char_traits<CharT>,
 		class Allocator = std::allocator<CharT>
 	>
-		std::basic_string<CharT, Traits, Allocator>& trim_both(std::basic_string<CharT, Traits, Allocator>& s)
+		std::basic_string<CharT, Traits, Allocator>& trim_both(
+			std::basic_string<CharT, Traits, Allocator>& s)
 	{
 		trim_left(s);
 		trim_right(s);
@@ -236,10 +260,77 @@ namespace asio2
 		}
 		return tokens;
 	}
+
+	/**
+	 * @function : Replaces all old_str characters that appear in the string with new_str characters.
+	 */
+	template<class String, class OldStr, class NewStr>
+	inline String& replace(String& s, const OldStr& old_str, const NewStr& new_str)
+	{
+		using size_type = typename String::size_type;
+		using old_str_type = std::remove_reference_t<std::remove_cv_t<OldStr>>;
+		using new_str_type = std::remove_reference_t<std::remove_cv_t<NewStr>>;
+		using old_raw_type = std::remove_pointer_t<std::remove_all_extents_t<old_str_type>>;
+		using new_raw_type = std::remove_pointer_t<std::remove_all_extents_t<new_str_type>>;
+
+		size_type old_str_size = 0;
+		size_type new_str_size = 0;
+
+		// char* char[] char
+		if constexpr (std::is_trivial_v<old_raw_type>)
+		{
+			// char* char[]
+			if constexpr (std::is_pointer_v<old_str_type> || std::is_array_v<old_str_type>)
+				old_str_size = std::basic_string_view<old_raw_type>{ old_str }.size();
+			// char
+			else
+				old_str_size = sizeof(old_str) / sizeof(old_raw_type);
+		}
+		// std::string
+		else
+		{
+			old_str_size = old_str.size();
+		}
+
+		if constexpr (std::is_trivial_v<new_raw_type>)
+		{
+			if constexpr (std::is_pointer_v<new_str_type> || std::is_array_v<new_str_type>)
+				new_str_size = std::basic_string_view<new_raw_type>{ new_str }.size();
+			else
+				new_str_size = sizeof(new_str) / sizeof(new_raw_type);
+		}
+		else
+		{
+			new_str_size = new_str.size();
+		}
+
+		for (size_type pos(0); pos != String::npos; pos += new_str_size)
+		{
+			pos = s.find(old_str, pos);
+			if (pos != String::npos)
+			{
+				if constexpr (std::is_pointer_v<new_str_type> || std::is_array_v<new_str_type>)
+					s.replace(pos, old_str_size, new_str);
+				else
+					s.replace(pos, old_str_size, new_str_size, new_str);
+			}
+			else
+				break;
+		}
+		return s;
+	}
 }
 
-#ifdef _MSC_VER
-#pragma warning(pop)
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#endif
+
+#if defined(__GNUC__) || defined(__GNUG__)
+#  pragma GCC diagnostic pop
+#endif
+
+#if defined(_MSC_VER)
+#  pragma warning(pop) 
 #endif
 
 #endif // !__ASIO2_STRING_HPP__

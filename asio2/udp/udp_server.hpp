@@ -25,6 +25,7 @@ namespace asio2::detail
 	class udp_server_impl_t : public server_impl_t<derived_t, session_t>
 	{
 		template <class, bool>  friend class user_timer_cp;
+		template <class>        friend class post_cp;
 		template <class, class> friend class server_impl_t;
 
 	public:
@@ -128,7 +129,8 @@ namespace asio2::detail
 		inline derived_t & bind_recv(F&& fun, C&&... obj)
 		{
 			this->listener_.bind(event::recv,
-				observer_t<std::shared_ptr<session_t>&, std::string_view>(std::forward<F>(fun), std::forward<C>(obj)...));
+				observer_t<std::shared_ptr<session_t>&, std::string_view>(
+					std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
@@ -146,7 +148,8 @@ namespace asio2::detail
 		inline derived_t & bind_connect(F&& fun, C&&... obj)
 		{
 			this->listener_.bind(event::connect,
-				observer_t<std::shared_ptr<session_t>&>(std::forward<F>(fun), std::forward<C>(obj)...));
+				observer_t<std::shared_ptr<session_t>&>(
+					std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
@@ -164,7 +167,8 @@ namespace asio2::detail
 		inline derived_t & bind_disconnect(F&& fun, C&&... obj)
 		{
 			this->listener_.bind(event::disconnect,
-				observer_t<std::shared_ptr<session_t>&>(std::forward<F>(fun), std::forward<C>(obj)...));
+				observer_t<std::shared_ptr<session_t>&>(
+					std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
@@ -179,7 +183,8 @@ namespace asio2::detail
 		template<class F, class ...C>
 		inline derived_t & bind_init(F&& fun, C&&... obj)
 		{
-			this->listener_.bind(event::init, observer_t<>(std::forward<F>(fun), std::forward<C>(obj)...));
+			this->listener_.bind(event::init, observer_t<>(
+				std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
@@ -195,7 +200,8 @@ namespace asio2::detail
 		template<class F, class ...C>
 		inline derived_t & bind_start(F&& fun, C&&... obj)
 		{
-			this->listener_.bind(event::start, observer_t<error_code>(std::forward<F>(fun), std::forward<C>(obj)...));
+			this->listener_.bind(event::start, observer_t<error_code>(
+				std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
@@ -211,7 +217,8 @@ namespace asio2::detail
 		template<class F, class ...C>
 		inline derived_t & bind_stop(F&& fun, C&&... obj)
 		{
-			this->listener_.bind(event::stop, observer_t<error_code>(std::forward<F>(fun), std::forward<C>(obj)...));
+			this->listener_.bind(event::stop, observer_t<error_code>(
+				std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
@@ -227,7 +234,8 @@ namespace asio2::detail
 		inline derived_t & bind_handshake(F&& fun, C&&... obj)
 		{
 			this->listener_.bind(event::handshake,
-				observer_t<std::shared_ptr<session_t>&, error_code>(std::forward<F>(fun), std::forward<C>(obj)...));
+				observer_t<std::shared_ptr<session_t>&, error_code>(
+					std::forward<F>(fun), std::forward<C>(obj)...));
 			return (this->derived());
 		}
 
@@ -262,11 +270,12 @@ namespace asio2::detail
 
 				this->counter_ptr_ = std::shared_ptr<void>((void*)1, [this](void*)
 				{
-					asio::post(this->io_.strand(), [this]()
+					this->derived().post([this]() mutable
 					{
 						state_t expected = state_t::stopping;
 						if (this->state_.compare_exchange_strong(expected, state_t::stopped))
-							this->derived()._handle_stop(asio::error::operation_aborted, std::shared_ptr<derived_t>{});
+							this->derived()._handle_stop(asio::error::operation_aborted,
+								this->derived().selfptr());
 						else
 							ASIO2_ASSERT(false);
 					});
@@ -280,15 +289,22 @@ namespace asio2::detail
 				// parse address and port
 				asio::ip::udp::resolver resolver(this->io_.context());
 				asio::ip::udp::endpoint endpoint = *resolver.resolve(h, p,
-					asio::ip::resolver_base::flags::passive | asio::ip::resolver_base::flags::address_configured).begin();
+					asio::ip::resolver_base::flags::passive |
+					asio::ip::resolver_base::flags::address_configured).begin();
 
 				this->acceptor_.open(endpoint.protocol());
 
-				// when you close socket in linux system,and start socket immediate,you will get like this "the address is in use",
-				// and bind is failed,but i'm suer i close the socket correct already before,why does this happen? the reasion is 
-				// the socket option "TIME_WAIT",although you close the socket,but the system not release the socket,util 2~4 
-				// seconds later,so we can use the SO_REUSEADDR option to avoid this problem,like below
-				this->acceptor_.set_option(asio::ip::udp::socket::reuse_address(true)); // set port reuse
+				// when you close socket in linux system,and start socket
+				// immediate,you will get like this "the address is in use",
+				// and bind is failed,but i'm suer i close the socket correct
+				// already before,why does this happen? the reasion is the
+				// socket option "TIME_WAIT",although you close the socket,
+				// but the system not release the socket,util 2~4 seconds later,
+				// so we can use the SO_REUSEADDR option to avoid this problem,
+				// like below
+
+				// set port reuse
+				this->acceptor_.set_option(asio::ip::udp::socket::reuse_address(true));
 
 				//// Join the multicast group. you can set this option in the on_init(_fire_init) function.
 				//this->acceptor_.set_option(
@@ -334,7 +350,7 @@ namespace asio2::detail
 
 				asio::detail::throw_error(ec);
 
-				asio::post(this->io_.strand(), [this, condition]()
+				this->derived().post([this, condition]() mutable
 				{
 					this->buffer_.consume(this->buffer_.size());
 
@@ -352,28 +368,35 @@ namespace asio2::detail
 		{
 			state_t expected = state_t::starting;
 			if (this->state_.compare_exchange_strong(expected, state_t::stopping))
-				return this->derived()._post_stop(ec, std::shared_ptr<derived_t>{}, expected);
+				return this->derived()._post_stop(ec, this->derived().selfptr(), expected);
 
 			expected = state_t::started;
 			if (this->state_.compare_exchange_strong(expected, state_t::stopping))
-				return this->derived()._post_stop(ec, std::shared_ptr<derived_t>{}, expected);
+				return this->derived()._post_stop(ec, this->derived().selfptr(), expected);
 		}
 
 		inline void _post_stop(const error_code& ec, std::shared_ptr<derived_t> self_ptr, state_t old_state)
 		{
-			// asio don't allow operate the same socket in multi thread,if you close socket in one thread and another thread is 
-			// calling socket's async_... function,it maybe crash.so we must care for operate the socket.when need close the
-			// socket ,we use the strand to post a event,make sure the socket's close operation is in the same thread.
+			// asio don't allow operate the same socket in multi thread,
+			// if you close socket in one thread and another thread is 
+			// calling socket's async_... function,it maybe crash.so we
+			// must care for operate the socket.when need close the
+			// socket ,we use the strand to post a event,make sure the
+			// socket's close operation is in the same thread.
 
 			// psot a recv signal to ensure that all recv events has finished already.
-			asio::post(this->io_.strand(), [this, ec, this_ptr = std::move(self_ptr), old_state]()
+			this->derived().post([this, ec, this_ptr = std::move(self_ptr), old_state]() mutable
 			{
+				detail::ignore::unused(this, old_state);
+
 				// When the code runs here,no new session can be emplace or erase to session_mgr.
-				// stop all the sessions, the session::stop must be no blocking,otherwise it may be cause loop lock.
+				// stop all the sessions, the session::stop must be no blocking,
+				// otherwise it may be cause loop lock.
 				set_last_error(ec);
 
-				// stop all the sessions, the session::stop must be no blocking,otherwise it may be cause loop lock.
-				this->sessions_.foreach([this](std::shared_ptr<session_t> & session_ptr)
+				// stop all the sessions, the session::stop must be no blocking,
+				// otherwise it may be cause loop lock.
+				this->sessions_.foreach([](std::shared_ptr<session_t> & session_ptr) mutable
 				{
 					session_ptr->stop();
 				});
@@ -407,8 +430,8 @@ namespace asio2::detail
 			{
 				this->acceptor_.async_receive_from(
 					this->buffer_.prepare(this->buffer_.pre_size()), this->remote_endpoint_,
-					asio::bind_executor(this->io_.strand(), make_allocator(this->allocator_,
-						[this, condition](const error_code& ec, std::size_t bytes_recvd)
+					asio::bind_executor(this->io_.strand(), make_allocator(this->rallocator_,
+						[this, condition](const error_code& ec, std::size_t bytes_recvd) mutable
 				{
 					this->derived()._handle_recv(ec, bytes_recvd, condition);
 				})));
@@ -421,7 +444,8 @@ namespace asio2::detail
 		}
 
 		template<typename MatchCondition>
-		inline void _handle_recv(const error_code& ec, std::size_t bytes_recvd, condition_wrap<MatchCondition> condition)
+		inline void _handle_recv(const error_code& ec, std::size_t bytes_recvd,
+			condition_wrap<MatchCondition> condition)
 		{
 			set_last_error(ec);
 
@@ -445,9 +469,55 @@ namespace asio2::detail
 				// we new a session and put it into the session_mgr pool
 				std::shared_ptr<session_t> session_ptr = this->sessions_.find(this->remote_endpoint_);
 				if (!session_ptr)
+				{
 					this->derived()._handle_accept(ec, s, session_ptr, condition);
+				}
 				else
-					session_ptr->_handle_recv(ec, s, session_ptr, condition);
+				{
+					if constexpr (std::is_same_v<MatchCondition, use_kcp_t>)
+					{
+						if (s.size() == sizeof(kcp::kcphdr))
+						{
+							if /**/ (kcp::is_kcphdr_syn(s))
+							{
+								if (session_ptr->kcp_)
+									session_ptr->kcp_->send_fin_ = false;
+								session_ptr->stop();
+
+								auto task = [this, ec, condition, session_ptr,
+									syn = std::string{ s.data(),s.size() }]
+									(event_guard<session_t>&& g) mutable
+								{
+									this->derived()._handle_accept(ec,
+										std::string_view{ syn }, session_ptr, condition);
+								};
+
+								session_ptr->push_event([this, t = std::move(task)]
+								(event_guard<session_t>&& g) mutable
+								{
+									auto task = [g = std::move(g), t = std::move(t)]() mutable
+									{
+										t(std::move(g));
+									};
+									this->derived().post(std::move(task));
+									return true;
+								});
+							}
+							else
+							{
+								std::ignore = true;
+							}
+						}
+						else
+						{
+							session_ptr->_handle_recv(ec, s, session_ptr, condition);
+						}
+					}
+					else
+					{
+						session_ptr->_handle_recv(ec, s, session_ptr, condition);
+					}
+				}
 			}
 
 			this->buffer_.consume(this->buffer_.size());
