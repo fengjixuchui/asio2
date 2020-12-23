@@ -23,39 +23,30 @@
 
 namespace asio2::detail
 {
-	template <class>                      class session_mgr_t;
-	template <class, class>               class tcp_server_impl_t;
-	template <class, class>               class tcps_server_impl_t;
+	ASIO2_CLASS_FORWARD_DECLARE_BASE;
+	ASIO2_CLASS_FORWARD_DECLARE_TCP_BASE;
+	ASIO2_CLASS_FORWARD_DECLARE_TCP_SERVER;
+	ASIO2_CLASS_FORWARD_DECLARE_TCP_SESSION;
 
-	template<class derived_t, class socket_t, class buffer_t>
+	template<class derived_t, class args_t>
 	class tcps_session_impl_t
-		: public tcp_session_impl_t<derived_t, socket_t, buffer_t>
-		, public ssl_stream_cp<derived_t, socket_t, true>
+		: public tcp_session_impl_t<derived_t, args_t>
+		, public ssl_stream_cp     <derived_t, args_t>
 	{
-		template <class, bool>                friend class user_timer_cp;
-		template <class>                      friend class post_cp;
-		template <class, class, bool>         friend class connect_cp;
-		template <class, class, bool>         friend class disconnect_cp;
-		template <class>                      friend class data_persistence_cp;
-		template <class>                      friend class event_queue_cp;
-		template <class, bool>                friend class send_cp;
-		template <class, bool>                friend class silence_timer_cp;
-		template <class, bool>                friend class connect_timeout_cp;
-		template <class, bool>                friend class tcp_send_op;
-		template <class, bool>                friend class tcp_recv_op;
-		template <class>                      friend class session_mgr_t;
-		template <class, class, class>        friend class session_impl_t;
-		template <class, class, class>        friend class tcp_session_impl_t;
-		template <class, class>               friend class tcp_server_impl_t;
-		template <class, class>               friend class tcps_server_impl_t;
-		template <class, class, bool>         friend class ssl_stream_cp;
+		ASIO2_CLASS_FRIEND_DECLARE_BASE;
+		ASIO2_CLASS_FRIEND_DECLARE_TCP_BASE;
+		ASIO2_CLASS_FRIEND_DECLARE_TCP_SERVER;
+		ASIO2_CLASS_FRIEND_DECLARE_TCP_SESSION;
 
 	public:
-		using self = tcps_session_impl_t<derived_t, socket_t, buffer_t>;
-		using super = tcp_session_impl_t<derived_t, socket_t, buffer_t>;
-		using key_type = std::size_t;
-		using buffer_type = buffer_t;
-		using ssl_stream_comp = ssl_stream_cp<derived_t, socket_t, true>;
+		using super = tcp_session_impl_t <derived_t, args_t>;
+		using self  = tcps_session_impl_t<derived_t, args_t>;
+
+		using key_type    = std::size_t;
+		using buffer_type = typename args_t::buffer_t;
+
+		using ssl_stream_comp = ssl_stream_cp<derived_t, args_t>;
+
 		using super::send;
 
 		/**
@@ -111,6 +102,8 @@ namespace asio2::detail
 
 		inline void _handle_disconnect(const error_code& ec, std::shared_ptr<derived_t> this_ptr)
 		{
+			this->derived()._rdc_stop();
+
 			this->derived()._ssl_stop(this_ptr, [this, ec, this_ptr]() mutable
 			{
 				super::_handle_disconnect(ec, std::move(this_ptr));
@@ -121,7 +114,7 @@ namespace asio2::detail
 		inline void _handle_connect(const error_code& ec, std::shared_ptr<derived_t> this_ptr,
 			condition_wrap<MatchCondition> condition)
 		{
-			this->derived().post([this, self_ptr = std::move(this_ptr), condition]() mutable
+			this->derived().post([this, self_ptr = std::move(this_ptr), condition = std::move(condition)]() mutable
 			{
 				this->derived()._ssl_start(self_ptr, condition, this->socket_, this->ctx_);
 
@@ -131,7 +124,7 @@ namespace asio2::detail
 
 		inline void _fire_handshake(std::shared_ptr<derived_t>& this_ptr, error_code ec)
 		{
-			this->listener_.notify(event::handshake, this_ptr, ec);
+			this->listener_.notify(event_type::handshake, this_ptr, ec);
 		}
 
 	protected:
@@ -141,10 +134,10 @@ namespace asio2::detail
 
 namespace asio2
 {
-	class tcps_session : public detail::tcps_session_impl_t<tcps_session, asio::ip::tcp::socket, asio::streambuf>
+	class tcps_session : public detail::tcps_session_impl_t<tcps_session, detail::template_args_tcp_session>
 	{
 	public:
-		using tcps_session_impl_t<tcps_session, asio::ip::tcp::socket, asio::streambuf>::tcps_session_impl_t;
+		using tcps_session_impl_t<tcps_session, detail::template_args_tcp_session>::tcps_session_impl_t;
 	};
 }
 
